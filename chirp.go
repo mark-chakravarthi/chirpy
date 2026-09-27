@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/mark-chakravarthi/chirpy/internal/auth"
 	"github.com/mark-chakravarthi/chirpy/internal/database"
 )
 
@@ -21,34 +22,41 @@ type Chirp struct {
 
 func (a *apiConfig) handleCreateChirp(w http.ResponseWriter, r *http.Request) {
 	type parameters struct {
-		Body   string    `json:"body"`
-		UserID uuid.UUID `json:"user_id"`
+		Body string `json:"body"`
+	}
+
+	token, err := auth.GetBearerToken(r.Header)
+	if err != nil {
+		respondWithError(w, http.StatusUnauthorized, err.Error())
+		return
+	}
+
+	userId, err := auth.ValidateJWT(token, a.secret)
+	if err != nil {
+		respondWithError(w, http.StatusUnauthorized, err.Error())
+		return
+	}
+
+	user, err := a.db.GetUser(r.Context(), userId)
+	if err != nil {
+		respondWithError(w, 400, "User does not exist")
+		return
 	}
 
 	decoder := json.NewDecoder(r.Body)
+	defer r.Body.Close()
 
 	params := parameters{}
 
-	err := decoder.Decode(&params)
+	err = decoder.Decode(&params)
 	if err != nil {
 		fmt.Printf("Error decoding parameters: %s", err)
 		respondWithError(w, 400, "Invalid request body")
 		return
 	}
 
-	if params.Body == "" || params.UserID == uuid.Nil {
-		respondWithError(w, 400, "Chirp/UserId cannot be empty")
-		return
-	}
-
 	if len(params.Body) > 140 {
 		respondWithError(w, 400, "Chirp is too long")
-		return
-	}
-
-	user, err := a.db.GetUser(r.Context(), params.UserID)
-	if err != nil {
-		respondWithError(w, 400, "User does not exist")
 		return
 	}
 
@@ -137,4 +145,43 @@ func (a *apiConfig) handleGetChirp(w http.ResponseWriter, r *http.Request) {
 	}
 
 	respondWithJSON(w, 200, c)
+}
+
+func (a *apiConfig) handleDeleteChirp(w http.ResponseWriter, r *http.Request) {
+	chirpId, err := uuid.Parse(r.PathValue("chirpID"))
+	if err != nil {
+		respondWithError(w, 400, "Invalid chirp ID")
+		return
+	}
+
+	token, err := auth.GetBearerToken(r.Header)
+	if err != nil {
+		respondWithError(w, http.StatusUnauthorized, err.Error())
+		return
+	}
+
+	userId, err := auth.ValidateJWT(token, a.secret)
+	if err != nil {
+		respondWithError(w, http.StatusUnauthorized, err.Error())
+		return
+	}
+
+	chirp, err := a.db.GetChirp(r.Context(), chirpId)
+	if err != nil {
+		respondWithError(w, 404, "Chirp not found")
+		return
+	}
+
+	if chirp.UserID != userId {
+		respondWithError(w, 403, "You are not the author of this chirp")
+		return
+	}
+
+	err = a.db.DeleteChirp(r.Context(), chirpId)
+	if err != nil {
+		respondWithError(w, 500, "Error deleting chirp")
+		return
+	}
+
+	w.WriteHeader(204)
 }

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -16,6 +17,19 @@ type User struct {
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 	Email     string    `json:"email"`
+}
+
+type LoginResponse struct {
+	ID           uuid.UUID `json:"id"`
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
+	Email        string    `json:"email"`
+	Token        string    `json:"token"`
+	RefreshToken string    `json:"refresh_token"`
+}
+
+type RefreshResponse struct {
+	Token string `json:"token"`
 }
 
 func (a *apiConfig) handleCreateUser(w http.ResponseWriter, r *http.Request) {
@@ -73,8 +87,9 @@ func (a *apiConfig) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 
 func (a *apiConfig) handleLogin(w http.ResponseWriter, r *http.Request) {
 	type parameters struct {
-		Email    string `json:"email"`
-		Password string `json:"password"`
+		Email            string `json:"email"`
+		Password         string `json:"password"`
+		ExpiresInSeconds *int   `json:"expires_in_seconds"`
 	}
 
 	params := parameters{}
@@ -102,11 +117,138 @@ func (a *apiConfig) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	token, err := auth.MakeJWT(user.ID, a.secret, time.Hour)
+	if err != nil {
+		fmt.Printf("Error creating token: %s", err)
+		respondWithError(w, 500, "Could not create token")
+		return
+	}
+
+	refreshToken := auth.MakeRefreshToken()
+
+	now := time.Now()
+	_, err = a.db.CreateRefreshToken(r.Context(), database.CreateRefreshTokenParams{
+		Token:     refreshToken,
+		UserID:    user.ID,
+		CreatedAt: now,
+		UpdatedAt: now,
+		ExpiresAt: now.Add(time.Hour * 24 * 60),
+		RevokedAt: sql.NullTime{},
+	})
+	if err != nil {
+		respondWithError(w, 500, "Could not create refresh token")
+		return
+	}
+
+	respondWithJSON(w, 200, LoginResponse{
+		ID:           user.ID,
+		Email:        user.Email,
+		CreatedAt:    user.CreatedAt,
+		UpdatedAt:    user.UpdatedAt,
+		Token:        token,
+		RefreshToken: refreshToken,
+	})
+}
+
+func (a *apiConfig) handleRefresh(w http.ResponseWriter, r *http.Request) {
+	refreshToken, err := auth.GetBearerToken(r.Header)
+	if err != nil {
+		respondWithError(w, http.StatusUnauthorized, err.Error())
+		return
+	}
+
+	record, err := a.db.GetUserFromRefreshToken(r.Context(), refreshToken)
+	if err != nil {
+		respondWithError(w, http.StatusUnauthorized, err.Error())
+		return
+	}
+
+	if record.RevokedAt.Valid || time.Now().After(record.ExpiresAt) {
+		respondWithError(w, http.StatusUnauthorized, "refresh token expired or revoked")
+		return
+	}
+
+	token, err := auth.MakeJWT(record.UserID, a.secret, time.Hour)
+	if err != nil {
+		fmt.Printf("Error creating token: %s", err)
+		respondWithError(w, 500, "Could not create token")
+		return
+	}
+
+	respondWithJSON(w, 200, RefreshResponse{
+		Token: token,
+	})
+}
+func (a *apiConfig) handleRevoke(w http.ResponseWriter, r *http.Request) {
+	refreshToken, err := auth.GetBearerToken(r.Header)
+	if err != nil {
+		respondWithError(w, http.StatusUnauthorized, err.Error())
+		return
+	}
+
+	_, err = a.db.RevokeRefreshToken(r.Context(), database.RevokeRefreshTokenParams{
+		Token:     refreshToken,
+		RevokedAt: sql.NullTime{Time: time.Now(), Valid: true},
+	})
+	if err != nil {
+		respondWithError(w, http.StatusUnauthorized, err.Error())
+		return
+	}
+
+	w.WriteHeader(204)
+}
+
+func (a *apiConfig) handleUpdateUserCreds(w http.ResponseWriter, r *http.Request) {
+	type parameters struct {
+		Email    string `json:"email"`
+		Password string `json:"password"`
+	}
+
+	token, err := auth.GetBearerToken(r.Header)
+	if err != nil {
+		respondWithError(w, http.StatusUnauthorized, err.Error())
+		return
+	}
+
+	userId, err := auth.ValidateJWT(token, a.secret)
+	if err != nil {
+		respondWithError(w, http.StatusUnauthorized, err.Error())
+		return
+	}
+
+	params := parameters{}
+
+	defer r.Body.Close()
+
+	decoder := json.NewDecoder(r.Body)
+	err = decoder.Decode(&params)
+	if err != nil {
+		fmt.Printf("Error decoding parameters: %s", err)
+		respondWithError(w, 400, "Invalid request body")
+		return
+	}
+
+	hashed_password, err := auth.HashPassword(params.Password)
+	if err != nil {
+		respondWithError(w, 400, "Error hashing password. User not created.")
+		return
+	}
+
+	user, err := a.db.UpdateUserCreds(r.Context(), database.UpdateUserCredsParams{
+		ID:             userId,
+		Email:          params.Email,
+		HashedPassword: hashed_password,
+	})
+	if err != nil {
+		respondWithError(w, 500, err.Error())
+		return
+	}
+
 	respondWithJSON(w, 200, User{
 		ID:        user.ID,
-		Email:     user.Email,
 		CreatedAt: user.CreatedAt,
 		UpdatedAt: user.UpdatedAt,
+		Email:     user.Email,
 	})
 
 }

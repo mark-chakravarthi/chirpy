@@ -1,10 +1,10 @@
 # http://localhost:8080/admin/metrics
 
 
-POST http://localhost:8080/api/login HTTP/1.1
+POST http://localhost:8080/api/chirps HTTP/1.1
 content-type: application/json
+authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJjaGlycHktYWNjZXNzIiwic3ViIjoiOTY3ZWJlYTQtNzZlMC00YjY5LTg0ZDQtN2E4NGE4MDY5NzFkIiwiZXhwIjoxNzkwNDkwODYxLCJpYXQiOjE3OTA0ODcyNjF9.UlXRmGYTnTpLbTrVNu2VbjY9m_ZfZx0KY9gi-pmmRjc
 
 {
-  "email": "saul@bettercall.com",
-  "password": "000011112"
+  "body": "Clearly his taste in women is the same as his taste in lawyers: only the very best... with just a right amount of dirty!"
 }
