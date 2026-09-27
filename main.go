@@ -18,6 +18,7 @@ type apiConfig struct {
 	fileServerHits atomic.Int32
 	db             *database.Queries
 	secret         string
+	polkaKey       string
 }
 
 func (a *apiConfig) middlewareMetricsInc(next http.Handler) http.Handler {
@@ -63,6 +64,7 @@ func main() {
 
 	dbURL := os.Getenv("DB_URL")
 	secret := os.Getenv("SECRET")
+	polkaKey := os.Getenv("POLKA_KEY")
 
 	db, err := sql.Open("postgres", dbURL)
 	if err != nil {
@@ -77,6 +79,7 @@ func main() {
 		fileServerHits: atomic.Int32{},
 		db:             dbQueries,
 		secret:         secret,
+		polkaKey:       polkaKey,
 	}
 
 	mux.Handle("/app/", apiCfg.middlewareMetricsInc(middlewareLog(http.StripPrefix("/app", http.FileServer(http.Dir(""))))))
@@ -104,6 +107,8 @@ func main() {
 	mux.HandleFunc("PUT /api/users", apiCfg.handleUpdateUserCreds)
 
 	mux.HandleFunc("DELETE /api/chirps/{chirpID}", apiCfg.handleDeleteChirp)
+
+	mux.HandleFunc("POST /api/polka/webhooks", apiCfg.handlePolkaWebhook)
 
 	server := &http.Server{
 		Addr:    ":8080",
