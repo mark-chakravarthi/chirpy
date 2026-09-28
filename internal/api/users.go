@@ -1,4 +1,4 @@
-package main
+package api
 
 import (
 	"database/sql"
@@ -34,7 +34,7 @@ type RefreshResponse struct {
 	Token string `json:"token"`
 }
 
-func (a *apiConfig) handleCreateUser(w http.ResponseWriter, r *http.Request) {
+func (cfg *Config) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 	type parameters struct {
 		Email    string `json:"email"`
 		Password string `json:"password"`
@@ -64,7 +64,7 @@ func (a *apiConfig) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	now := time.Now().UTC()
-	newUser, err := a.db.CreateUser(r.Context(), database.CreateUserParams{
+	newUser, err := cfg.db.CreateUser(r.Context(), database.CreateUserParams{
 		ID:             uuid.New(),
 		Email:          param.Email,
 		CreatedAt:      now,
@@ -88,7 +88,7 @@ func (a *apiConfig) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 	respondWithJSON(w, 201, user)
 }
 
-func (a *apiConfig) handleLogin(w http.ResponseWriter, r *http.Request) {
+func (cfg *Config) handleLogin(w http.ResponseWriter, r *http.Request) {
 	type parameters struct {
 		Email            string `json:"email"`
 		Password         string `json:"password"`
@@ -108,7 +108,7 @@ func (a *apiConfig) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	user, err := a.db.GetUserByEmail(r.Context(), params.Email)
+	user, err := cfg.db.GetUserByEmail(r.Context(), params.Email)
 	if err != nil {
 		respondWithError(w, 401, "Incorrect email or password")
 		return
@@ -120,7 +120,7 @@ func (a *apiConfig) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	token, err := auth.MakeJWT(user.ID, a.secret, time.Hour)
+	token, err := auth.MakeJWT(user.ID, cfg.secret, time.Hour)
 	if err != nil {
 		fmt.Printf("Error creating token: %s", err)
 		respondWithError(w, 500, "Could not create token")
@@ -130,7 +130,7 @@ func (a *apiConfig) handleLogin(w http.ResponseWriter, r *http.Request) {
 	refreshToken := auth.MakeRefreshToken()
 
 	now := time.Now()
-	_, err = a.db.CreateRefreshToken(r.Context(), database.CreateRefreshTokenParams{
+	_, err = cfg.db.CreateRefreshToken(r.Context(), database.CreateRefreshTokenParams{
 		Token:     refreshToken,
 		UserID:    user.ID,
 		CreatedAt: now,
@@ -154,14 +154,14 @@ func (a *apiConfig) handleLogin(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (a *apiConfig) handleRefresh(w http.ResponseWriter, r *http.Request) {
+func (cfg *Config) handleRefresh(w http.ResponseWriter, r *http.Request) {
 	refreshToken, err := auth.GetBearerToken(r.Header)
 	if err != nil {
 		respondWithError(w, http.StatusUnauthorized, err.Error())
 		return
 	}
 
-	record, err := a.db.GetUserFromRefreshToken(r.Context(), refreshToken)
+	record, err := cfg.db.GetUserFromRefreshToken(r.Context(), refreshToken)
 	if err != nil {
 		respondWithError(w, http.StatusUnauthorized, err.Error())
 		return
@@ -172,7 +172,7 @@ func (a *apiConfig) handleRefresh(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	token, err := auth.MakeJWT(record.UserID, a.secret, time.Hour)
+	token, err := auth.MakeJWT(record.UserID, cfg.secret, time.Hour)
 	if err != nil {
 		fmt.Printf("Error creating token: %s", err)
 		respondWithError(w, 500, "Could not create token")
@@ -183,14 +183,15 @@ func (a *apiConfig) handleRefresh(w http.ResponseWriter, r *http.Request) {
 		Token: token,
 	})
 }
-func (a *apiConfig) handleRevoke(w http.ResponseWriter, r *http.Request) {
+
+func (cfg *Config) handleRevoke(w http.ResponseWriter, r *http.Request) {
 	refreshToken, err := auth.GetBearerToken(r.Header)
 	if err != nil {
 		respondWithError(w, http.StatusUnauthorized, err.Error())
 		return
 	}
 
-	_, err = a.db.RevokeRefreshToken(r.Context(), database.RevokeRefreshTokenParams{
+	_, err = cfg.db.RevokeRefreshToken(r.Context(), database.RevokeRefreshTokenParams{
 		Token:     refreshToken,
 		RevokedAt: sql.NullTime{Time: time.Now(), Valid: true},
 	})
@@ -202,7 +203,7 @@ func (a *apiConfig) handleRevoke(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(204)
 }
 
-func (a *apiConfig) handleUpdateUserCreds(w http.ResponseWriter, r *http.Request) {
+func (cfg *Config) handleUpdateUserCreds(w http.ResponseWriter, r *http.Request) {
 	type parameters struct {
 		Email    string `json:"email"`
 		Password string `json:"password"`
@@ -214,7 +215,7 @@ func (a *apiConfig) handleUpdateUserCreds(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	userId, err := auth.ValidateJWT(token, a.secret)
+	userId, err := auth.ValidateJWT(token, cfg.secret)
 	if err != nil {
 		respondWithError(w, http.StatusUnauthorized, err.Error())
 		return
@@ -238,7 +239,7 @@ func (a *apiConfig) handleUpdateUserCreds(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	user, err := a.db.UpdateUserCreds(r.Context(), database.UpdateUserCredsParams{
+	user, err := cfg.db.UpdateUserCreds(r.Context(), database.UpdateUserCredsParams{
 		ID:             userId,
 		Email:          params.Email,
 		HashedPassword: hashed_password,
@@ -255,5 +256,4 @@ func (a *apiConfig) handleUpdateUserCreds(w http.ResponseWriter, r *http.Request
 		Email:       user.Email,
 		IsChirpyRed: user.IsChirpyRed,
 	})
-
 }

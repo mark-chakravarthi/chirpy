@@ -1,4 +1,4 @@
-package main
+package api
 
 import (
 	"database/sql"
@@ -11,7 +11,7 @@ import (
 	"github.com/mark-chakravarthi/chirpy/internal/auth"
 )
 
-func (a *apiConfig) handlePolkaWebhook(w http.ResponseWriter, r *http.Request) {
+func (cfg *Config) handlePolkaWebhook(w http.ResponseWriter, r *http.Request) {
 	type parameters struct {
 		Event string `json:"event"`
 		Data  struct {
@@ -20,7 +20,7 @@ func (a *apiConfig) handlePolkaWebhook(w http.ResponseWriter, r *http.Request) {
 	}
 
 	apiKey, err := auth.GetAPIKey(r.Header)
-	if err != nil || apiKey != a.polkaKey {
+	if err != nil || apiKey != cfg.polkaKey {
 		respondWithError(w, 401, "Unauthorized")
 		return
 	}
@@ -41,7 +41,7 @@ func (a *apiConfig) handlePolkaWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_, err = a.db.UpgradeUserToChirpyRed(r.Context(), params.Data.UserID)
+	_, err = cfg.db.UpgradeUserToChirpyRed(r.Context(), params.Data.UserID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			respondWithError(w, 404, "User not found")

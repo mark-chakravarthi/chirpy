@@ -1,9 +1,10 @@
-package main
+package api
 
 import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
@@ -20,7 +21,7 @@ type Chirp struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
-func (a *apiConfig) handleCreateChirp(w http.ResponseWriter, r *http.Request) {
+func (cfg *Config) handleCreateChirp(w http.ResponseWriter, r *http.Request) {
 	type parameters struct {
 		Body string `json:"body"`
 	}
@@ -31,13 +32,13 @@ func (a *apiConfig) handleCreateChirp(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	userId, err := auth.ValidateJWT(token, a.secret)
+	userId, err := auth.ValidateJWT(token, cfg.secret)
 	if err != nil {
 		respondWithError(w, http.StatusUnauthorized, err.Error())
 		return
 	}
 
-	user, err := a.db.GetUser(r.Context(), userId)
+	user, err := cfg.db.GetUser(r.Context(), userId)
 	if err != nil {
 		respondWithError(w, 400, "User does not exist")
 		return
@@ -63,7 +64,7 @@ func (a *apiConfig) handleCreateChirp(w http.ResponseWriter, r *http.Request) {
 	chirpBody := removeProfanity(params.Body)
 
 	now := time.Now()
-	newChirp, err := a.db.CreateChirp(r.Context(), database.CreateChirpParams{
+	newChirp, err := cfg.db.CreateChirp(r.Context(), database.CreateChirpParams{
 		ID:        uuid.New(),
 		Body:      chirpBody,
 		UserID:    user.ID,
@@ -101,8 +102,20 @@ func removeProfanity(s string) string {
 	return strings.Join(words, " ")
 }
 
-func (a *apiConfig) handleGetChirps(w http.ResponseWriter, r *http.Request) {
-	fetchedChirps, err := a.db.GetChirps(r.Context())
+func (cfg *Config) handleGetChirps(w http.ResponseWriter, r *http.Request) {
+	authorIDParam := r.URL.Query().Get("author_id")
+
+	var authorID uuid.NullUUID
+	if authorIDParam != "" {
+		parsed, parseErr := uuid.Parse(authorIDParam)
+		if parseErr != nil {
+			respondWithError(w, 400, "Invalid author ID")
+			return
+		}
+		authorID = uuid.NullUUID{UUID: parsed, Valid: true}
+	}
+
+	fetchedChirps, err := cfg.db.GetChirps(r.Context(), authorID)
 	if err != nil {
 		respondWithError(w, 400, "Error fetching chirps")
 		return
@@ -120,17 +133,23 @@ func (a *apiConfig) handleGetChirps(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
+	if r.URL.Query().Get("sort") == "desc" {
+		sort.Slice(chirps, func(i, j int) bool {
+			return chirps[i].CreatedAt.After(chirps[j].CreatedAt)
+		})
+	}
+
 	respondWithJSON(w, 200, chirps)
 }
 
-func (a *apiConfig) handleGetChirp(w http.ResponseWriter, r *http.Request) {
+func (cfg *Config) handleGetChirp(w http.ResponseWriter, r *http.Request) {
 	id, err := uuid.Parse(r.PathValue("chirpID"))
 	if err != nil {
 		respondWithError(w, 400, "Invalid chirp ID")
 		return
 	}
 
-	chirp, err := a.db.GetChirp(r.Context(), id)
+	chirp, err := cfg.db.GetChirp(r.Context(), id)
 	if err != nil {
 		respondWithError(w, 404, "Error fetching chirp")
 		return
@@ -147,7 +166,7 @@ func (a *apiConfig) handleGetChirp(w http.ResponseWriter, r *http.Request) {
 	respondWithJSON(w, 200, c)
 }
 
-func (a *apiConfig) handleDeleteChirp(w http.ResponseWriter, r *http.Request) {
+func (cfg *Config) handleDeleteChirp(w http.ResponseWriter, r *http.Request) {
 	chirpId, err := uuid.Parse(r.PathValue("chirpID"))
 	if err != nil {
 		respondWithError(w, 400, "Invalid chirp ID")
@@ -160,13 +179,13 @@ func (a *apiConfig) handleDeleteChirp(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	userId, err := auth.ValidateJWT(token, a.secret)
+	userId, err := auth.ValidateJWT(token, cfg.secret)
 	if err != nil {
 		respondWithError(w, http.StatusUnauthorized, err.Error())
 		return
 	}
 
-	chirp, err := a.db.GetChirp(r.Context(), chirpId)
+	chirp, err := cfg.db.GetChirp(r.Context(), chirpId)
 	if err != nil {
 		respondWithError(w, 404, "Chirp not found")
 		return
@@ -177,7 +196,7 @@ func (a *apiConfig) handleDeleteChirp(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err = a.db.DeleteChirp(r.Context(), chirpId)
+	err = cfg.db.DeleteChirp(r.Context(), chirpId)
 	if err != nil {
 		respondWithError(w, 500, "Error deleting chirp")
 		return

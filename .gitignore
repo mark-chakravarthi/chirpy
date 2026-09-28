@@ -29,6 +29,7 @@ go.work.sum
 
 # build output
 /out
+/chirpy
 
 # Editor/IDE
 # .idea/

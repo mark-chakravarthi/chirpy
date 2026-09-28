@@ -73,11 +73,12 @@ func (q *Queries) GetChirp(ctx context.Context, id uuid.UUID) (Chirp, error) {
 
 const getChirps = `-- name: GetChirps :many
 SELECT id, body, created_at, updated_at, user_id FROM chirps
+WHERE user_id = COALESCE($1, user_id)
 ORDER BY created_at ASC
 `
 
-func (q *Queries) GetChirps(ctx context.Context) ([]Chirp, error) {
-	rows, err := q.db.QueryContext(ctx, getChirps)
+func (q *Queries) GetChirps(ctx context.Context, authorID uuid.NullUUID) ([]Chirp, error) {
+	rows, err := q.db.QueryContext(ctx, getChirps, authorID)
 	if err != nil {
 		return nil, err
 	}
